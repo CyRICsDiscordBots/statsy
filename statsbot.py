@@ -23,383 +23,66 @@ SOFTWARE.
 '''
 
 
+
 import discord
-import crasync
 from discord.ext import commands
 from ext.context import CustomContext
-from ext.paginator import PaginatorSession
-from ext import embeds
+from ext.config import ConfigDatabase
 from collections import defaultdict
-from contextlib import redirect_stdout
-import datetime
-import traceback
 import asyncio
 import aiohttp
-import psutil
+import datetime
 import time
 import json
 import sys
 import os
 import re
-import inspect
-import io
+import sqlite3
+import traceback
 import textwrap
-from pymongo import MongoClient
+import psutil
+import inspect
+import importlib
 
-client = MongoClient("string")
-db = client.test
+dev_list = [
+    180314310298304512,
+    168143064517443584,
+    273381165229146112,
+    319395783847837696,
+    323578534763298816
+]
 
-user_tags = db.usertags.insert_one()
-guild_config = db.config.insert_one({str(ctx.guild.id):ctx.guild.name})
-
-
-class InvalidTag(commands.BadArgument):
-    '''Raised when a tag is invalid.'''
-    pass
-
-class StatsBot(commands.AutoShardedBot):
-    '''
-    Custom client for statsy made by Kyber
-    '''
-    emoji_servers = [
-        376364364636094465, 
-        376368487037140992, 
-        376364990023729152, 
-        377742732501843968,
-        376365022752014345
-        ]
-
-    developers = [
-        273381165229146112,
-        319395783847837696,
-        180314310298304512,
-        377742732501843968,
-        319778485239545868,
-        325012556940836864
-    ]
-
-    def __init__(self):
-        super().__init__(command_prefix=None)
-        self.session = aiohttp.ClientSession(loop=self.loop)
-        self.cr = crasync.Client(self.session)
-        self.uptime = datetime.datetime.utcnow()
-        self.commands_used = defaultdict(int)
-        self.process = psutil.Process()
-        self.remove_command('help')
-        self.messages_sent = 0
-        self.maintenance_mode = False
-        self.psa_message = None
-        self.loop.create_task(self.backup_task())
-        self.load_extensions()
-        self.cogs['Bot_Related'] = self
-
-    def get_game_emojis(self):
-        emojis = []
-        for id in self.emoji_servers:
-            g = self.get_guild(id)
-            for e in g.emojis:
-                emojis.append(e)
-        return emojis
-
-    def _add_commands(self):
-        '''Adds commands automatically'''
-        for name, attr in inspect.getmembers(self):
-            if isinstance(attr, commands.Command):
-                self.add_command(attr)
-
-    def load_extensions(self, cogs=None, path='cogs.'):
-        '''Loads the default set of extensions or a seperate one if given'''
-        base_extensions = [x.replace('.py', '') for x in os.listdir('cogs') if x.endswith('.py')]
-        for extension in cogs or base_extensions:
-            try:
-                self.load_extension(f'{path}{extension}')
-                print(f'Loaded extension: {extension}')
-            except Exception as e:
-                print(f'LoadError: {extension}\n'
-                      f'{type(e).__name__}: {e}')
+class StatsBoard:
+    def __init__(self, bot, channel, base=None):
+        self.bot = bot
+        self.channel = channel
+        self.base = base
+        self.running = bool(base)
 
     @property
-    def token(self):
-        
-        if db.usertags.find({ str(ctx.user.id): { $exists: true, $ne: null } }) is not None:
-            the_token = db.usertags.distinct(str(ctx.user.id))
-            return the_token[0]
-        
-        else:
-            return None
-
-    @property
-    def botlist(self):
-        '''Returns your botlist token wherever it is'''
-        try:
-            with open('data/config.json') as f:
-                return json.load(f)['botlist'].strip('"')
-        except FileNotFoundError:
-            return None
-
-    @classmethod
-    def init(bot, token=None):
-        '''Starts the actual bot'''
-        bot = StatsBot()
-        token = token or bot.token
-        try:
-            bot.run(token.strip('"'), bot=True, reconnect=True)
-        except Exception as e:
-            print('Error in starting the bot. Check your token.')
-
-    def restart(self):
-        '''Forcefully restart the bot.'''
-        os.execv(sys.executable, ['python'] + sys.argv)
-
-    async def get_prefix(self, message):
-        '''Returns the prefix.
-
-        need to switch to a db soon
-        '''
-        with open('data/guild.json') as f:
-            cfg = json.load(f)
-
-        id = str(getattr(message.guild, 'id', None))
-
-        prefixes = [
-            f'<@{self.user.id}> ', 
-            f'<@!{self.user.id}> ',
-            cfg.get(id, '!')
-            ]
-
-        return prefixes
-
-    async def on_connect(self):
-        '''
-        Called when the bot has established a 
-        gateway connection with discord
-        '''
-        print('----------------------------')
-        print('StatsBot connected!')
-        print('----------------------------')
-
-        self._add_commands()
-        # had to put this here due to an issue with the 
-        # latencies property
-        self.constants = await self.cr.get_constants()
-        # await self.change_presence(game=discord.Game(name='!help'))
-
-    async def on_ready(self):
-        '''
-        Called when guild streaming is complete 
-        and the client's internal cache is ready.
-        '''
-        fmt = 'StatsBot is ready!\n' \
-              '----------------------------\n' \
-              f'Logged in as: {self.user}\n' \
-              f'Client ID: {self.user.id}\n' \
-              '----------------------------\n' \
-              f'Guilds: {len(self.guilds)}\n' \
-              f'Users: {len(self.users)}\n' \
-              '----------------------------' 
-        print(fmt)
-        channel = self.get_channel(373646610560712704)
-        self.game_emojis = self.get_game_emojis()
-        await channel.send(f'```{fmt}```')
-
-    async def on_shard_ready(self, shard_id):
-        '''
-        Called when a shard has successfuly 
-        connected to the gateway.
-        '''
-        print(f'Shard `{shard_id}` ready!')
-        print('----------------------------')
-
-    async def on_command(self, ctx):
-        '''Called when a command is invoked.'''
-        cmd = ctx.command.qualified_name.replace(' ', '_')
-        self.commands_used[cmd] += 1
-
-    async def process_commands(self, message):
-        '''Utilises the CustomContext subclass of discord.Context'''
-        ctx = await self.get_context(message, cls=CustomContext)
-        if ctx.command is None:
-            return
-        else:
-            if self.maintenance_mode is True:
-                if message.author.id not in self.developers:
-                    return await ctx.send('The bot is under maintenance at the moment!')
-            await self.invoke(ctx)
-
-    async def on_command_error(self, ctx, error):
-        error_message = 'Player tags should only contain these characters:\n' \
-                        '**Numbers:** 0, 2, 8, 9\n' \
-                        '**Letters:** P, Y, L, Q, G, R, J, C, U, V'
-        if isinstance(error, InvalidTag):
-            await ctx.send(error_message)
-        else:
-            if isinstance(error, commands.MissingRequiredArgument):
-                prefix = (await self.get_prefix(ctx.message))[2]
-                await ctx.send(
-                    embed=discord.Embed(
-                        color=embeds.random_color(), 
-                        title=f'``Usage: {prefix}{ctx.command.signature}``', 
-                        description=ctx.command.help)
-                    )
-            else:
-                error_message = 'Ignoring exception in command {}:\n'.format(ctx.command)
-                error_message += ''.join(traceback.format_exception(type(error), error, error.__traceback__))
-                log_channel = self.get_channel(376622292106608640)
-                em = discord.Embed(
-                    color=discord.Color.orange(), 
-                    description=f"```\n{error_message}\n```", 
-                    title=ctx.message.content)
-                await log_channel.send(embed=em)
-                print(error_message, file=sys.stderr)
-
-
-    async def on_message(self, message):
-        '''Called when a message is sent/recieved.'''
-        self.messages_sent += 1
-        if message.author.bot:
-            return 
-        await self.process_commands(message)
-
-    async def backup_task(self):
-        '''Backup tags.'''
-        await self.wait_until_ready()
-        channel = self.get_channel(378546850376056832)
-        url = 'https://hastebin.com/documents'
-
-        em = discord.Embed(color=0x00FFFF)
-        em.set_author(
-            name='Tag Backup',
-            icon_url=self.user.avatar_url
-            )
-
-        while not self.is_closed():
-            with open('data/stats.json') as f:
-                data = f.read()
-
-            async with self.session.post(url=url, data=data) as resp:
-                k = await resp.json()
-
-            key = k['key']
-
-            em.description = f'http://hastebin.com/{key}.json'
-            await channel.send(embed=em)
-            await self.session.post('https://discordbots.org/api/bots/347006499677143041/stats', json={"server_count": len(self.guilds)}, headers={'Authorization': self.botlist})
-            await asyncio.sleep(36000)
-
-    @commands.command()
-    async def ping(self, ctx):
-        """Pong! Returns average shard latency."""
+    def current_stats(self):
         em = discord.Embed()
-        em.title ='Pong! Websocket Latency: '
-        em.description = f'{self.latency * 1000:.4f} ms'
-        em.color = 0xf9c93d
-        try:
-            await ctx.send(embed=em)
-        except discord.Forbidden:
-            await ctx.send(em.title + em.description)
-
-    @commands.command(hidden=True)
-    async def psa(self, ctx, *, message):
-        if ctx.author.id not in self.developers:
-            return
-
-        em = discord.Embed(color=0xf9c93d)
-        em.title = 'Created Announcement'
-        em.description = message
-
-        if message.lower() in 'clearnone':
-            em.title = 'Cleared PSA Message'
-            em.description = '✅'
-            self.psa_message = None
-        else:
-            self.psa_message = message
-
-        await ctx.send(embed=em)
-
-
-    @commands.command(hidden=True)
-    async def maintenance(self, ctx):
-        if ctx.author.id not in self.developers:
-            return
-
-        if self.maintenance_mode is True:
-            await self.change_presence(
-                status=discord.Status.online,
-                game=None
-                )
-
-            self.maintenance_mode = False
-
-            await ctx.send('`Maintenance mode turned off.`')
-
-        else:
-            await self.change_presence(
-                status=discord.Status.dnd,
-                game=discord.Game(name='maintenance!')
-                )
-
-            self.maintenance_mode = True
-
-            await ctx.send('`Maintenance mode turned on.`')
-
-
-    @commands.command()
-    async def invite(self, ctx):
-        """Returns the invite url for the bot."""
-        perms = discord.Permissions.none()
-        perms.read_messages = True
-        perms.external_emojis = True
-        perms.send_messages = True
-        perms.embed_links = True
-        perms.attach_files = True
-        perms.add_reactions = True
-        perms.manage_messages = True
-        await ctx.send(f'**Invite link:** \n<{discord.utils.oauth_url(self.user.id, perms)}>')
-
-    @commands.command()
-    @commands.has_permissions(manage_guild=True)
-    async def prefix(self, ctx, *, prefix):
-        '''Change the bot prefix for your server.'''
-        id = str(ctx.guild.id)
-        guild_config = db.config.update_one({id : ctx.guild.name},
-                {'$set': {id.prefix : str(prefix) }}, upsert=True)
-
-        the_prefix = db.config.distinct(id.prefix)
-        await ctx.send('Changed prefix to ' + )
-
-    @commands.command(name='bot',aliases=['about', 'info', 'botto'])
-    async def _bot(self, ctx):
-        '''Shows information and stats about the bot.'''
-        cmd = r'git show -s HEAD~3..HEAD --format="[{}](https://github.com/cgrok/statsy/commit/%H) %s (%cr)"'
-
-        if os.name == 'posix':
-            cmd = cmd.format(r'\`%h\`')
-        else:
-            cmd = cmd.format(r'`%h`')
-
-        revision = os.popen(cmd).read().strip()
-
-        em = discord.Embed()
-        em.add_field(name='Latest Changes', value=revision, inline=False)
         em.timestamp = datetime.datetime.utcnow()
-        status = str(ctx.guild.me.status)
+        status = None
+        me = self.channel.guild.me
+        status = str(me.status)
         if status == 'online':
-            em.set_author(name="Bot Information", icon_url='https://i.imgur.com/wlh1Uwb.png')
+            em.set_author(name="I'm Grok - Live Stats", icon_url='https://i.imgur.com/wlh1Uwb.png')
             em.color = discord.Color.green()
         elif status == 'dnd':
             status = 'maintenance'
-            em.set_author(name="Bot Information", icon_url='https://i.imgur.com/lbMqojO.png')
+            em.set_author(name="I'm Grok - Live Stats", icon_url='https://i.imgur.com/lbMqojO.png')
             em.color = discord.Color.purple()
         else:
-            em.set_author(name="Bot Information", icon_url='https://i.imgur.com/dCLTaI3.png')
+            em.set_author(name="I'm Grok - Live Stats", icon_url='https://i.imgur.com/dCLTaI3.png')
             em.color = discord.Color.red()
 
-        total_online = len({m.id for m in self.get_all_members() if m.status is not discord.Status.offline})
-        total_unique = len(self.users)
-        channels = sum(1 for g in self.guilds for _ in g.channels)
+        total_online = len({m.id for m in self.bot.get_all_members() if m.status is not discord.Status.offline})
+        total_unique = len(self.bot.users)
+        channels = sum(1 for g in self.bot.guilds for _ in g.channels)
 
         now = datetime.datetime.utcnow()
-        delta = now - self.uptime
+        delta = now - self.bot.uptime
         hours, remainder = divmod(int(delta.total_seconds()), 3600)
         minutes, seconds = divmod(remainder, 60)
         days, hours = divmod(hours, 24)
@@ -408,252 +91,371 @@ class StatsBot(commands.AutoShardedBot):
         if days:
             fmt = '{d}d ' + fmt
         uptime = fmt.format(d=days, h=hours, m=minutes, s=seconds)
-        data = ctx.load_json()
-        saved_tags = len(data['clashroyale'])+len(data['clashofclans'])
         g_authors = 'verixx, fourjr, kwugfighter, FloatCobra, XAOS1502'
-
-        if self.psa_message:
-            em.description = f'*{self.psa_message}*'
-        else:
-            em.description = 'Statsy is a realtime game stats bot made by Kyber, Kwug and 4JR.'
-
-        cbot = '<:certifiedbot:308880575379275776>'
 
         em.add_field(name='Current Status', value=str(status).title())
         em.add_field(name='Uptime', value=uptime)
-        em.add_field(name='Latency', value=f'{self.latency*1000:.2f} ms')
-        em.add_field(name='Guilds', value=len(self.guilds))
+        em.add_field(name='Latency', value=f'{self.bot.ws.latency*1000:.2f} ms')
+        em.add_field(name='Guilds', value=len(self.bot.guilds))
         em.add_field(name='Members', value=f'{total_online}/{total_unique} online')
         em.add_field(name='Channels', value=f'{channels} total')
-        memory_usage = self.process.memory_full_info().uss / 1024**2
-        cpu_usage = self.process.cpu_percent() / psutil.cpu_count()
+        memory_usage = self.bot.process.memory_full_info().uss / 1024**2
+        cpu_usage = self.bot.process.cpu_percent() / psutil.cpu_count()
         em.add_field(name='RAM Usage', value=f'{memory_usage:.2f} MiB')
         em.add_field(name='CPU Usage',value=f'{cpu_usage:.2f}% CPU')
-        em.add_field(name='Commands Run', value=sum(self.commands_used.values()))
-        em.add_field(name='Saved Tags', value=saved_tags)
-        em.add_field(name='Library', value='discord.py')
-        em.add_field(name='Github', value='[Click Here](https://github.com/grokkers/cr-statsbot)')
-        em.add_field(name='Upvote This Bot!', value=f'https://discordbots.org/bot/statsy {cbot}')
-        em.set_footer(text=f'Bot ID: {self.user.id}')
+        em.add_field(name='Commands Run', value=sum(self.bot.commands_used.values()))
+        em.add_field(name='Messages', value=self.bot.messages_sent)
+        em.add_field(name='Github', value='[Click Here](https://github.com/verixx/grokbot)')
+        em.add_field(name='Invite', value=f'[Click Here]({discord.utils.oauth_url(self.bot.user.id)})')
+        em.set_footer(text=f'Bot ID: {self.bot.user.id}')
 
-        await ctx.send(embed=em)
-
-    @commands.command(hidden=True)
-    async def update(self, ctx):
-        '''Update the bot.'''
-        if ctx.author.id not in self.developers:
-            return
-        with open('data/config.json') as f:
-            password = json.load(f).get('password')
-
-        em = discord.Embed(color=0xf9c93d)
-        em.title = 'Updating Bot'
-        em.description = 'Pulling from repository and restarting `stats.service`.'
-        await ctx.send(embed=em)
-        command = 'sh ../stats.sh'
-        p = os.system(f'echo {password}|sudo -S {command}')
-
-    @commands.command(hidden=True)
-    async def tokenupdate(self, ctx, _token):
-        '''Update the bot's botlist token'''
-        if ctx.author.id not in self.developers:
-            return
-        with open('data/config.json') as f:
-            config = json.load(f)
-        config['botlist'] = _token
-        with open('data/config.json', 'w') as f:
-            json.dump(config, f, indent=4)
-        await ctx.send('Updated bot list token, restarting bot.')
-        await ctx.invoke(StatsBot.update)
-
-
-    def format_cog_help(self, name, cog, prefix):
-        '''Formats the text for a cog help'''
-        sigs = []
-
-        for cmd in self.commands:
-            if cmd.hidden:
-                continue
-            if cmd.instance is cog:
-                sigs.append(len(cmd.qualified_name)+len(prefix))
-                if hasattr(cmd, 'all_commands'):
-                    for c in cmd.all_commands.values():
-                        sigs.append(len('\u200b  └─ ' + c.name)+1)
-
-        maxlen = max(sigs)
-
-        fmt = ''
-        for cmd in self.commands:
-            if cmd.instance is cog:
-                if cmd.hidden:
-                    continue
-                fmt += f'`{prefix+cmd.qualified_name:<{maxlen}} '
-                fmt += f'{cmd.short_doc:<{maxlen}}`\n'
-                if hasattr(cmd, 'commands'):
-                    for c in cmd.commands:
-                        branch = '\u200b  └─ ' + c.name
-                        fmt += f"`{branch:<{maxlen+1}} " 
-                        fmt += f"{c.short_doc:<{maxlen}}`\n"
-
-        em = discord.Embed(title=name.replace('_',' '))
-        em.color = embeds.random_color()
-        em.description = '*'+(self.psa_message or inspect.getdoc(cog))+'*'
-        em.add_field(name='Commands', value=fmt)
-        em.set_footer(text=f'Type {prefix}help command for more info on a command.')
 
         return em
 
-    def format_command_help(self, command, prefix):
-        '''Formats command help.'''
-        name = command.replace(' ', '_')
-        cog = self.cogs.get(name)
-        if cog is not None:
-            return self.format_cog_help(name, cog, prefix)
-        cmd = self.get_command(command)
-        if cmd is not None:
-            return discord.Embed(
-                    color=embeds.random_color(),
-                    title=f'`{prefix}{cmd.signature}`', 
-                    description=cmd.help
-                    )
-                
-    @commands.command()
-    async def help(self, ctx, *, command=None):
-        """Shows the help message."""
-        prefix = (await self.get_prefix(ctx.message))[2]
+    async def make_base(self):
+        self.base = await self.channel.send(embed=self.current_stats)
+        self.running = True
+        with open('data/config.json') as f:
+            data = json.load(f)
+        with open('data/config.json', 'w') as f:
+            data['base'] = self.base.id
+            json.dump(data, f)
 
-        if command:
-            em = self.format_command_help(command, prefix)
-            if em:
-                return await ctx.send(embed=em)
-            else:
-                return await ctx.send('Could not find a cog or command by that name.')
+    async def force_update(self):
+        await self.base.edit(embed=self.current_stats)
 
-        pages = []
+    async def run(self):
+        if not self.running:
+            await self.make_base()
 
-        for name, cog in sorted(self.cogs.items()):
-            em = self.format_cog_help(name, cog, prefix)
-            pages.append(em)
+        if isinstance(self.base, int):
+            try:
+                self.base = await self.channel.get_message(self.base)
+            except:
+                await self.make_base()
 
-        p_session = PaginatorSession(ctx, 
-            footer_text=f'Type {prefix}help command for more info on a command.',
-            pages=pages
-            )
+        while self.running:
+            try:
+                await self.base.edit(embed=self.current_stats)
+            except discord.HTTPException:
+                await self.make_base()
+            await asyncio.sleep(5)
 
-        await p_session.run()
 
-    @commands.command()
-    async def source(self, ctx, *, command: str = None):
-        """Displays full source code or for a specific command.
-        To display the source code of a subcommand you can separate it spaces. 
-        e.g. `!source members best`
+
+class GrokBot(commands.Bot):
+    '''
+    GrokBot!
+    '''
+    _mentions_transforms = {
+        '@everyone': '@\u200beveryone',
+        '@here': '@\u200bhere'
+    }
+
+    _mention_pattern = re.compile('|'.join(_mentions_transforms.keys()))
+
+    def __init__(self, **attrs):
+        super().__init__(command_prefix=self.get_pre)
+        self.uptime = datetime.datetime.utcnow()
+        self.db = ConfigDatabase(self)
+        self.session = aiohttp.ClientSession(loop=self.loop)
+        self.process = psutil.Process()
+        self._extensions = [x.replace('.py', '') for x in os.listdir('cogs') if x.endswith('.py')]
+        self.messages_sent = 0
+        self.commands_used = defaultdict(int)
+        self.loop.create_task(self.statsboard())
+        #self.remove_command('help')
+        self.add_command(self.ping)
+        self.add_command(self.shutdown)
+        self.add_command(self.maintenance)
+        self.load_extensions()
+        self.load_community_extensions()
+
+    def load_extensions(self, cogs=None, path='cogs.'):
+        '''Loads the default set of extensions or a seperate one if given'''
+        for extension in cogs or self._extensions:
+            try:
+                self.load_extension(f'{path}{extension}')
+                print(f'Loaded extension: {extension}')
+            except Exception as e:
+                print(e)
+
+    def load_community_extensions(self):
+        '''Loads up community extensions.'''
+        with open('data/community_cogs.txt') as fp:
+            to_load = fp.read().splitlines()
+        if to_load:
+            self.load_extensions(to_load, 'cogs.community.')
+
+
+    def load_extension(self, name):
+        """Loads an extension.
         """
-        source_url = 'https://github.com/cgrok/statsy'
-        if command is None:
-            return await ctx.send(source_url)
+        if name in self.extensions:
+            return
 
-        obj = self.get_command(command.replace('.', ' '))
-        if obj is None:
-            return await ctx.send('Could not find command.')
+        lib = importlib.import_module(name)
+        if not hasattr(lib, 'setup'):
+            del lib
+            del sys.modules[name]
+            raise discord.ClientException('extension does not have a setup function')
 
-        src = obj.callback.__code__
-        lines, firstlineno = inspect.getsourcelines(src)
-        if not obj.callback.__module__.startswith('discord'):
-            location = os.path.relpath(src.co_filename).replace('\\', '/')
+        try:
+            ret = lib.setup(self)
+        except Exception as e:
+            raise e
         else:
-            location = obj.callback.__module__.replace('.', '/') + '.py'
-            source_url = 'https://github.com/Rapptz/discord.py'
+            self.extensions[name] = lib
+            return ret
 
-        final_url = f'<{source_url}/blob/master/{location}#L{firstlineno}-L{firstlineno + len(lines) - 1}>'
-        await ctx.send(final_url)
+    def add_cog(self, cog):
+        """
+        Adds a "cog" to the bot. Modified to inclued 
+        database table initialisation functions.
+        """
 
-    @commands.command(pass_context=True, hidden=True, name='eval')
-    async def _eval(self, ctx, *, body: str):
-        """Evaluates python code"""
+        cog_name = type(cog).__name__
 
-        if ctx.author.id not in self.developers: return
+        self.cogs[cog_name] = cog
+
+        try:
+            check = getattr(cog, '_{.__class__.__name__}__global_check'.format(cog))
+        except AttributeError:
+            pass
+        else:
+            self.add_check(check)
+
+        try:
+            check = getattr(cog, '_{.__class__.__name__}__global_check_once'.format(cog))
+        except AttributeError:
+            pass
+        else:
+            self.add_check(check, call_once=True)
+
+        members = inspect.getmembers(cog)
+        for name, member in members:
+            # register commands the cog has
+            if isinstance(member, commands.Command):
+                if member.parent is None:
+                    self.add_command(member)
+                continue
+
+            # Initialise cog database tables
+            if name.startswith('_init_table_'):
+                table_name = name.replace('_init_table_', cog_name)
+                self.initialise_table(table_name, member)
+
+            # register event listeners the cog has
+            if name.startswith('on_'):
+                self.add_listener(member, name)
+
+        return cog
+
+
+    def get_type(self, param):
+
+        annotation_map = {
+            str: 'STRING',
+            int: 'INTEGER',
+            float: 'REAL',
+                }
+
+        if param.annotation is inspect._empty:
+            return 'STRING'
+        else:
+            return annotation_map.get(param.annotation, 'STRING')
+
+
+    def initialise_table(name, function):
         
-        env = {
-            'bot': self,
-            'ctx': ctx,
-            'channel': ctx.channel,
-            'author': ctx.author,
-            'guild': ctx.guild,
-            'message': ctx.message,
-            #'_': self._last_result,
-            'source': inspect.getsource
-        }
+        TABLE = ''
 
-        env.update(globals())
+        signature = inspect.signature(function).parameters.items()
 
-        body = self.cleanup_code(body)
-        stdout = io.StringIO()
-        err = out = None
-
-        to_compile = f'async def func():\n{textwrap.indent(body, "  ")}'
-
-        try:
-            exec(to_compile, env)
-        except Exception as e:
-            err = await ctx.send(f'```py\n{e.__class__.__name__}: {e}\n```')
-            return await err.add_reaction('\u2049')
-
-        func = env['func']
-        try:
-            with redirect_stdout(stdout):
-                ret = await func()
-        except Exception as e:
-            value = stdout.getvalue()
-            err = await ctx.send(f'```py\n{value}{traceback.format_exc()}\n```')
-        else:
-            value = stdout.getvalue()
-            if self.token in value:
-                value = value.replace(self.token,"[EXPUNGED]")
-            if ret is None:
-                if value:
-                    try:
-                        out = await ctx.send(f'```py\n{value}\n```')
-                    except:
-                        paginated_text = ctx.paginate(value)
-                        for page in paginated_text:
-                            if page == paginated_text[-1]:
-                                out = await ctx.send(f'```py\n{page}\n```')
-                                break
-                            await ctx.send(f'```py\n{page}\n```')
+        for i, (name, param) in enumerate(signature):
+            if not i:
+                TABLE += f'{name} {self.get_type(param)} PRIMARY KEY UNIQUE,'
             else:
-                self._last_result = ret
-                try:
-                    out = await ctx.send(f'```py\n{value}{ret}\n```')
-                except:
-                    paginated_text = ctx.paginate(f"{value}{ret}")
-                    for page in paginated_text:
-                        if page == paginated_text[-1]:
-                            out = await ctx.send(f'```py\n{page}\n```')
-                            break
-                        await ctx.send(f'```py\n{page}\n```')
+                TABLE += f'{name} {self.get_type(param)}'
 
-        if out:
-            await ctx.message.add_reaction('\u2705') #tick
-        if err:
-            await ctx.message.add_reaction('\u2049') #x
+        query = '''CREATE TABLE IF NOT EXISTS {name}({TABLE})'''.format(name=name, TABLE=TABLE)
+
+        with self.db.conn:
+            self.db.cur.execute(query)
+
+        self.return_table_object(name, function)
+
+
+    def return_table_object(name, function):
+        pass
+
+
+    @property
+    def token(self):
+        '''Returns your token wherever it is'''
+        with open('./data/config.json') as f:
+            config = json.load(f)
+            if config.get('TOKEN') == "your_token_here":
+                if not os.environ.get('TOKEN'):
+                    self.run_wizard()
+            else:
+                token = config.get('TOKEN').strip('\"')
+
+        return os.environ.get('TOKEN') or token
+
+    @staticmethod
+    async def get_pre(bot, message):
+        '''Returns the prefix.'''
+        with open('./data/config.json') as f: # TODO: guild specific prefixes
+            prefix = json.load(f).get('PREFIX')
+        return os.environ.get('PREFIX') or prefix or 'g.'
+
+    @property
+    def config(self,ctx):
+        return self.db.get_guild(ctx.message.guild.id)
+
+    @staticmethod
+    def run_wizard():
+        '''Wizard for first start'''
+        print('------------------------------------------')
+        token = input('Enter your token:\n> ')
+        print('------------------------------------------')
+        prefix = input('Enter a prefix for your bot:\n> ')
+        data = {
+                "TOKEN" : token,
+                "PREFIX" : prefix,
+            }
+        with open('./data/config.json','w') as f:
+            f.write(json.dumps(data, indent=4))
+        print('------------------------------------------')
+        print('Restarting...')
+        print('------------------------------------------')
+        os.execv(sys.executable, ['python'] + sys.argv)
+
+    @classmethod
+    def init(bot, token=None):
+        '''Starts the actual bot'''
+        bot = bot()
+        safe_token = token or bot.token.strip('\"')
+        try:
+            bot.run(safe_token, reconnect=True)
+        except Exception as e:
+            print(e)
+
+    async def on_connect(self):
+        print('---------------\n'
+              'GrokBot connected!')
+
+    async def send_cmd_help(self, ctx):
+        if ctx.invoked_subcommand:
+            pages = self.formatter.format_help_for(ctx, ctx.invoked_subcommand)
+            for page in pages:
+                await ctx.send(page)
         else:
-            await ctx.message.add_reaction('\u2705')
+            pages = self.formatter.format_help_for(ctx, ctx.command)
+            for page in pages:
+                await ctx.send(page)
+    # WHY WON'T YOU WORK
 
-    def cleanup_code(self, content):
-        """Automatically removes code blocks from the code."""
-        # remove ```py\n```
-        if content.startswith('```') and content.endswith('```'):
-            return '\n'.join(content.split('\n')[1:-1])
+    async def on_ready(self):
+        '''Bot startup, sets uptime.'''
 
-        # remove `foo`
-        return content.strip('` \n')
 
-    def get_syntax_error(self, e):
-        if e.text is None:
-            return f'```py\n{e.__class__.__name__}: {e}\n```'
-        return f'```py\n{e.text}{"^":>{e.offset}}\n{e.__class__.__name__}: {e}```'
+        for guild in self.guilds: # sets default configs for all guilds.
+            if self.db.get_data(guild.id) is None:
+                self.db.set_default_config(guild.id)
+
+        print(textwrap.dedent(f'''
+        ---------------
+        Client is ready!
+        ---------------
+        Authors: verixx, fourjr, kwugfighter,
+                 FloatCobra, XAOS1502
+        ---------------
+        Logged in as: {self.user}
+        User ID: {self.user.id}
+        ---------------
+        '''))
+
+    async def on_command_error(self, ctx, error):
+
+        send_help = (commands.MissingRequiredArgument, commands.BadArgument, commands.TooManyArguments, commands.UserInputError)
+        em = discord.Embed(color = discord.Color.red(), timestamp=ctx.message.created_at, description="Command Error:")
+        em.set_author(name=str(ctx.author), icon_url=ctx.author.avatar_url)
+        if ctx.invoked_subcommand:
+            em.add_field(name="Invoked Subcommand", value=ctx.invoked_subcommand, inline=False)
+        else:
+            em.add_field(name="Invoked Command", value=ctx.command, inline=False)
+        em.add_field(name="Error", value=f'```py\n{error}\n```', inline=False)
+        await self.get_channel(365640420249567273).send(embed=em)
+
+
+    async def on_command(self, ctx):
+        cmd = ctx.command.qualified_name.replace(' ', '_')
+        self.commands_used[cmd] += 1
+
+    async def process_commands(self, message):
+        '''Utilises the CustomContext subclass of discord.Context'''
+        ctx = await self.get_context(message, cls=CustomContext)
+        if ctx.command is None:
+            return
+        await self.invoke(ctx)
+
+    async def on_message(self, message):
+        '''Extra calculations'''
+        if message.author.bot:
+            return
+        self.messages_sent += 1
+        self.last_message = time.time()
+        await self.process_commands(message)
+
+    async def statsboard(self):
+        await self.wait_until_ready()
+        channel = self.get_channel(364720838743949313)
+        with open('data/config.json') as f:
+            base = json.load(f).get('base')
+        self.statsboard = StatsBoard(self, channel, base)
+        await self.statsboard.run()
+
+    @commands.command()
+    async def ping(self, ctx):
+        '''Pong! Returns your websocket latency.'''
+        em = discord.Embed()
+        em.title ='Pong! Websocket Latency:'
+        em.description = f'{self.ws.latency * 1000:.4f} ms'
+        em.color = 0x00FFFF
+        try:
+            await ctx.send(embed=em)
+        except discord.HTTPException:
+            em_list = await embedtobox.etb(emb)
+            for page in em_list:
+                await ctx.send(page)
+
+    @commands.command()
+    async def maintenance(self, ctx):
+        if str(ctx.guild.me.status) == 'dnd':
+            await ctx.send('Going back to normal.')
+            await self.change_presence(status=discord.Status.online, game=None)
+            return await self.statsboard.force_update()
+        await self.change_presence(status=discord.Status.dnd, game=discord.Game(name='under maintenance.'))
+        await ctx.send('Going into maintenance mode.')
+        await self.statsboard.force_update()
+
+    @commands.command()
+    async def shutdown(self, ctx, maintenance=None):
+        '''Shuts down the bot'''
+        if ctx.author.id in dev_list:
+            if maintenance:
+                await self.change_presence(status=discord.Status.dnd)
+            else:
+                await self.change_presence(status=discord.Status.offline)
+            await self.statsboard.force_update()
+            await ctx.send('Shutting Down...')
+            self.session.close()
+            await self.logout()
+
 
 
 
 if __name__ == '__main__':
-    StatsBot.init()
+    GrokBot.init()
