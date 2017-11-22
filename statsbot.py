@@ -22,6 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 '''
 
+
 import discord
 import crasync
 from discord.ext import commands
@@ -43,6 +44,14 @@ import re
 import inspect
 import io
 import textwrap
+from pymongo import MongoClient
+
+client = MongoClient("string")
+db = client.test
+
+user_tags = db.usertags.insert_one()
+guild_config = db.config.insert_one({str(ctx.guild.id):ctx.guild.name})
+
 
 class InvalidTag(commands.BadArgument):
     '''Raised when a tag is invalid.'''
@@ -111,11 +120,12 @@ class StatsBot(commands.AutoShardedBot):
 
     @property
     def token(self):
-        '''Returns your token wherever it is'''
-        try:
-            with open('data/config.json') as f:
-                return json.load(f)['token'].strip('"')
-        except FileNotFoundError:
+        
+        if db.usertags.find({ str(ctx.user.id): { $exists: true, $ne: null } }) is not None:
+            the_token = db.usertags.distinct(str(ctx.user.id))
+            return the_token[0]
+        
+        else:
             return None
 
     @property
@@ -351,10 +361,11 @@ class StatsBot(commands.AutoShardedBot):
     async def prefix(self, ctx, *, prefix):
         '''Change the bot prefix for your server.'''
         id = str(ctx.guild.id)
-        g_config = ctx.load_json('data/guild.json')
-        g_config[id] = prefix
-        ctx.save_json(g_config, 'data/guild.json')
-        await ctx.send(f'Changed the prefix to: `{prefix}`')
+        guild_config = db.config.update_one({id : ctx.guild.name},
+                {'$set': {id.prefix : str(prefix) }}, upsert=True)
+
+        the_prefix = db.config.distinct(id.prefix)
+        await ctx.send('Changed prefix to ' + )
 
     @commands.command(name='bot',aliases=['about', 'info', 'botto'])
     async def _bot(self, ctx):
