@@ -95,13 +95,16 @@ class CustomContext(commands.Context):
 
     def remove_tag(self, tag, game, id=None):
         id = id or self.author.id
-        user_tags = db.usertags.update({"user tags" : "here"}, { $unset : {str(game) + '.' + str(id) : str(tag)} });
+        game = game.lower()
+        if game in games:
+            user_tags = db.usertags.update({"user tags" : "here"}, { '$unset' : {str(game) + '.' + str(id) : str(tag)} });
 
 
     def get_tag(self, game, id=None, *, index=0):
         id = id or self.author.id
-        tag = db.usertags.distinct(str(game) + '.' + str(id)
-        return tag[0]
+        if game in games:
+            tag = db.usertags.distinct(str(game) + '.' + str(id)
+            return tag[0]
 
     @staticmethod
     def paginate(text: str):
