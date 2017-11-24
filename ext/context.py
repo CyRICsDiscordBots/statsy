@@ -7,6 +7,13 @@ import io
 import os
 import json
 
+from pymongo import MongoClient
+client = MongoClient("String")
+
+db = client.test
+games = ['clash royale', 'clash of clans', 'overwatch']
+user_tags = db.usertags.insert_one({"user tags":"here", "clash_royale": {}, "clash_of_clans": {}, "overwatch": {}})
+
 class CustomContext(commands.Context):
     '''Custom Context class to provide utility.'''
     def __init__(self, **kwargs):
@@ -65,32 +72,36 @@ class CustomContext(commands.Context):
         with open(path or 'data/stats.json', 'w') as f:
             f.write(json.dumps(data, indent=4))
 
+    
+    def save_db (self, key, value):
+        user_tags = db.usertags.update_one({"user tags" : "here"}, {'$set': {key : value}}, upsert=True)
+        
+        
     def save_tag(self, tag, game, id=None):
         id = id or self.author.id
-        data = self.load_json()
-        data[game][str(id)] = [tag]
-        self.save_json(data)
+        game = game.lower()
+        if game in games:
+            user_tags = db.usertags.update_one({"user tags" : "here"}, {'$set': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
+        else:
+            return "Invalid game" 
 
     def add_tag(self, tag, game, id=None):
         id = id or self.author.id
-        data = self.load_json()
-        if str(id) not in data:
-            data[game][str(id)] = []
-        data[game][str(id)].append(tag)
-        self.save_json(data)
+        
+        if db.usertags.find({ str(id): { $exists: true, $ne: null } }) is None:
+            user_tags = db.usertags.update_one({"user tags" : "here"}, {'$set': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
+        else: 
+            pass
 
     def remove_tag(self, tag, game, id=None):
         id = id or self.author.id
-        data = self.load_json()
-        tags = data[game][str(id)]
-        tags.remove(tag)
-        self.save_json(data)
+        user_tags = db.usertags.update({"user tags" : "here"}, { $unset : {str(game) + '.' + str(id) : str(tag)} });
+
 
     def get_tag(self, game, id=None, *, index=0):
         id = id or self.author.id
-        data = self.load_json()
-        tags = data[game][str(id)]
-        return tags[index]
+        tag = db.usertags.distinct(str(game) + '.' + str(id)
+        return tag[0]
 
     @staticmethod
     def paginate(text: str):
