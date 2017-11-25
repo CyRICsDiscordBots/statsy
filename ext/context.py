@@ -11,7 +11,7 @@ from pymongo import MongoClient
 client = MongoClient("string")
 db = client.test
 games = ['clash_royale', 'clash_of_clans', 'overwatch']
-user_tags = db.usertags.insert_one({"user tags":"here", "clash_royale": {}, "clash_of_clans": {}, "overwatch": {}})
+user_tags = db.usertags
 
 class CustomContext(commands.Context):
     '''Custom Context class to provide utility.'''
@@ -79,16 +79,18 @@ class CustomContext(commands.Context):
     def save_tag(self, tag, game, id=None):
         id = id or self.author.id
         game = game.lower()
+        user_tags = db.usertags.update_one({"user tags" : "here"}, {'$push': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
+
         
-        user_tags = db.usertags.update_one({"user tags" : "here"}, {'$set': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
-        print("successful")
+            
         
 
     def add_tag(self, tag, game, id=None):
         id = id or self.author.id
         
         if db.usertags.find({ str(game) + '.' + str(id): { '$exists': True, '$ne': None } }) is None:
-            user_tags = db.usertags.update_one({"user tags" : "here"}, {'$set': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
+            user_tags = db.usertags.update_one({"user tags" : "here"}, {'$push': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
+
         else: 
             pass
 
@@ -99,11 +101,12 @@ class CustomContext(commands.Context):
             user_tags = db.usertags.update({"user tags" : "here"}, { '$unset' : {str(game) + '.' + str(id) : str(tag)} });
 
 
-    def get_tag(self, game, id=None, *, index=0):
+    def get_tag(self, game, id=None, *, index=1):
         id = id or self.author.id
-        if game in games:
-            tag = db.usertags.distinct(str(game) + '.' + str(id))
-            return tag[0]
+
+        tag = db.usertags.distinct(str(game) + '.' + str(id))
+        return tag[index - 1]
+
 
     @staticmethod
     def paginate(text: str):
