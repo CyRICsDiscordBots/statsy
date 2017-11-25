@@ -289,10 +289,14 @@ class Clash_Royale:
 
         if not tag:
             raise InvalidTag('Invalid tag') 
+        try:
+            ctx.save_tag(tag, 'clashroyale')
+            await ctx.send('Successfuly saved tag.')
+        except Exception as e:
+            await ctx.send("Your profile is already saved!")
 
-        ctx.save_tag(tag, 'clashroyale')
-
-        await ctx.send('Successfuly saved tag.')
+        
+        
 
     @commands.group(invoke_without_command=True)
     async def deck(self, ctx, *, tag_or_user: TagCheck=None):
