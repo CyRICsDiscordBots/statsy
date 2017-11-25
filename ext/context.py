@@ -8,10 +8,10 @@ import os
 import json
 
 from pymongo import MongoClient
-client = MongoClient("String")
+client = MongoClient("mongodb://oommenb:Manny123@cluster0bbb-shard-00-00-ffddp.mongodb.net:27017,cluster0bbb-shard-00-01-ffddp.mongodb.net:27017,cluster0bbb-shard-00-02-ffddp.mongodb.net:27017/test?ssl=true&replicaSet=Cluster0bbb-shard-0&authSource=admin")
 
 db = client.test
-games = ['clash royale', 'clash of clans', 'overwatch']
+games = ['clash_royale', 'clash_of_clans', 'overwatch']
 user_tags = db.usertags.insert_one({"user tags":"here", "clash_royale": {}, "clash_of_clans": {}, "overwatch": {}})
 
 class CustomContext(commands.Context):
@@ -80,15 +80,15 @@ class CustomContext(commands.Context):
     def save_tag(self, tag, game, id=None):
         id = id or self.author.id
         game = game.lower()
-        if game in games:
-            user_tags = db.usertags.update_one({"user tags" : "here"}, {'$set': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
-        else:
-            return "Invalid game" 
+        
+        user_tags = db.usertags.update_one({"user tags" : "here"}, {'$set': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
+        print("successful")
+        
 
     def add_tag(self, tag, game, id=None):
         id = id or self.author.id
         
-        if db.usertags.find({ str(id): { $exists: true, $ne: null } }) is None:
+        if db.usertags.find({ str(game) + '.' + str(id): { '$exists': True, '$ne': None } }) is None:
             user_tags = db.usertags.update_one({"user tags" : "here"}, {'$set': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
         else: 
             pass
@@ -103,7 +103,7 @@ class CustomContext(commands.Context):
     def get_tag(self, game, id=None, *, index=0):
         id = id or self.author.id
         if game in games:
-            tag = db.usertags.distinct(str(game) + '.' + str(id)
+            tag = db.usertags.distinct(str(game) + '.' + str(id))
             return tag[0]
 
     @staticmethod
