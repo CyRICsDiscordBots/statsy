@@ -8,7 +8,7 @@ import os
 import json
 
 from pymongo import MongoClient
-client = MongoClient("string")
+client = MongoClient("mongodb://codegrokdevs:CodeGrokDevs@statsydb-shard-00-00-ena7u.mongodb.net:27017,statsydb-shard-00-01-ena7u.mongodb.net:27017,statsydb-shard-00-02-ena7u.mongodb.net:27017/test?ssl=true&replicaSet=StatsyDB-shard-0&authSource=admin")
 db = client.test
 games = ['clash_royale', 'clash_of_clans', 'overwatch']
 user_tags = db.usertags
