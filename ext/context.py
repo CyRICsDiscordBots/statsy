@@ -8,8 +8,7 @@ import os
 import json
 
 from pymongo import MongoClient
-client = MongoClient("mongodb://oommenb:Manny123@cluster0bbb-shard-00-00-ffddp.mongodb.net:27017,cluster0bbb-shard-00-01-ffddp.mongodb.net:27017,cluster0bbb-shard-00-02-ffddp.mongodb.net:27017/test?ssl=true&replicaSet=Cluster0bbb-shard-0&authSource=admin")
-
+client = MongoClient("string")
 db = client.test
 games = ['clash_royale', 'clash_of_clans', 'overwatch']
 user_tags = db.usertags.insert_one({"user tags":"here", "clash_royale": {}, "clash_of_clans": {}, "overwatch": {}})
