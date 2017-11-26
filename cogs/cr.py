@@ -106,12 +106,12 @@ class Clash_Royale:
                 em = await embeds.format_profile(ctx, profile)
                 await ctx.send(embed=em)
 
-    @commands.group(invoke_without_command=True)
-    ''' Deletes a tag '''
+    '''@commands.group(invoke_without_command=True)
+    
     async def remove(self, ctx, game, tag):
         ctx.remove_tag(tag,game)
         ctx.send("tag removed")
-        
+        '''
     @commands.group(invoke_without_command=True, aliases=['season'])
     async def seasons(self, ctx, *, tag_or_user: TagCheck=None):
         '''Gets the season results a player.'''
