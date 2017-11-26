@@ -8,7 +8,8 @@ import os
 import json
 
 from pymongo import MongoClient
-client = MongoClient("")
+client = MongoClient("mongodb://oommenb:Manny123@cluster0bbb-shard-00-00-ffddp.mongodb.net:27017,cluster0bbb-shard-00-01-ffddp.mongodb.net:27017,cluster0bbb-shard-00-02-ffddp.mongodb.net:27017/test?ssl=true&replicaSet=Cluster0bbb-shard-0&authSource=admin")
+
 db = client.test
 games = ['clash_royale', 'clash_of_clans', 'overwatch']
 user_tags = db.usertags
@@ -79,7 +80,25 @@ class CustomContext(commands.Context):
     def save_tag(self, tag, game, id=None):
         id = id or self.author.id
         game = game.lower()
-        user_tags = db.usertags.update_one({"user tags" : "here"}, {'$push': {str(game) + '.' + str(id) : str(tag)}}, upsert=True)
+        mylist = []
+        mylist.append(str(tag))
+        #if not db.usertags.distinct(str(id)):
+            #user_tags = db.usertags.update_one({"user tags" : "here"}, {'$set': {str(game) + '.' + str(id) : mylist}}, upsert=True)
+        cursor = db.usertags.find({str(game) + '.' + str(id): {"$exists": True}}).limit(1)
+        if cursor.count() > 0:
+            ting = db.usertags.distinct(str(game) + '.' + str(id))
+            ting.append(str(tag))
+            thong = ting
+            user_tags = db.usertags.update_one({"user tags": "here"}, {'$set': {str(game) + '.' + str(id): thong}},
+                                       upsert=True)
+
+        else:
+            user_tags = db.usertags.update_one({"user tags": "here"}, {'$set': {str(game) + '.' + str(id): mylist}}, upsert=True)
+
+
+
+        
+
 
         
             
@@ -97,15 +116,18 @@ class CustomContext(commands.Context):
     def remove_tag(self, tag, game, id=None):
         id = id or self.author.id
         game = game.lower()
-        if game in games:
-            user_tags = db.usertags.update({"user tags" : "here"}, { '$unset' : {str(game) + '.' + str(id) : str(tag)} });
+
+        the_tag = db.usertags.distinct(str(game) + '.' + str(id))
+        the_tag.remove(str(tag))
+        user_tags = db.usertags.update({"user tags" : "here"}, { '$set' : {str(game) + '.' + str(id) : the_tag} });
 
 
-    def get_tag(self, game, id=None, *, index=1):
+    def get_tag(self, game, id=None, *, index=0):
         id = id or self.author.id
 
         tag = db.usertags.distinct(str(game) + '.' + str(id))
-        return tag[index - 1]
+        
+        return tag[index]
 
 
     @staticmethod
